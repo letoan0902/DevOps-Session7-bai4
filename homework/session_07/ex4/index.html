@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PTIT DevOps - Session 07 - Bài 4</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; background: #f4f6f8; color: #222; margin: 0; }
+  main { max-width: 720px; margin: 40px auto; padding: 0 16px; }
+  .card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
+  h1 { font-size: 24px; margin: 0 0 4px; color: #0b5394; }
+  h2 { font-size: 17px; margin: 0 0 12px; }
+  .sub { margin: 0; color: #555; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e8eb; }
+  th { width: 38%; color: #444; font-weight: 600; }
+  code { background: #eef1f4; padding: 1px 5px; border-radius: 3px; }
+  footer { color: #777; font-size: 13px; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1>PTIT DevOps Course</h1>
+    <p class="sub">Session 07 - Bài 4: Cấu hình Reverse Proxy Nginx cho ứng dụng Spring Boot</p>
+  </div>
+
+  <div class="card">
+    <h2>Thông tin học viên</h2>
+    <table>
+      <tr><th>Họ tên</th><td>Lê Phú Toàn</td></tr>
+      <tr><th>Mã lớp</th><td>PTIT-DEVOPS-2026</td></tr>
+      <tr><th>Khóa học</th><td>PTIT DevOps Course</td></tr>
+      <tr><th>Session</th><td>07 - Bài 4</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Kiến trúc định tuyến</h2>
+    <p>Nginx lắng nghe ở cổng 80 và phân luồng lưu lượng theo đường dẫn:</p>
+    <table>
+      <tr><th><code>/</code></th><td>Lưu lượng tĩnh, Nginx phục vụ trực tiếp từ <code>/var/www/html/</code> (trang này).</td></tr>
+      <tr><th><code>/api/</code></th><td>Lưu lượng động, Nginx chuyển tiếp đến ứng dụng Spring Boot tại <code>127.0.0.1:8082</code>.</td></tr>
+    </table>
+    <p>Thử gọi <a href="/api/health"><code>/api/health</code></a> để nhận phản hồi JSON từ backend.</p>
+  </div>
+
+  <footer>Phục vụ bởi Nginx - Reverse Proxy cho Spring Boot</footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,428 @@
+# Log phiên làm việc - Bài 4, Session 07 (2026-10-08)
+# Máy cá nhân: Windows, Git Bash, IP công cộng 113.161.72.19
+# Máy chủ: halo (103.116.104.228), user devops, cổng SSH 2222
+
+# ===== Phần 1: Đăng nhập và kiểm tra hiện trạng Nginx (09:01) =====
+
+$ ssh -p 2222 -i ~/.ssh/id_ed25519_ptit_s02 devops@103.116.104.228
+Welcome to Ubuntu 24.04.3 LTS (GNU/Linux 6.8.0-87-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+
+ System information as of Thu Oct  8 09:01:52 +07 2026
+
+  System load:  0.04               Processes:             124
+  Usage of /:   32.4% of 38.70GB   Users logged in:       0
+  Memory usage: 24%                IPv4 address for eth0: 103.116.104.228
+  Swap usage:   0%
+
+
+Expanded Security Maintenance for Applications is not enabled.
+
+0 updates can be applied immediately.
+
+Enable ESM Apps to receive additional future security updates.
+See https://ubuntu.com/esm or run: sudo pro status
+
+
+Last login: Thu Oct  8 08:19:44 2026 from 113.161.72.19
+devops@halo:~$ whoami
+devops
+devops@halo:~$ hostname
+halo
+devops@halo:~$ date
+Thu Oct  8 09:02:19 AM +07 2026
+devops@halo:~$ nginx -v
+nginx version: nginx/1.24.0 (Ubuntu)
+devops@halo:~$ systemctl is-active nginx
+active
+devops@halo:~$ ls -l /etc/nginx/sites-enabled/
+total 0
+lrwxrwxrwx 1 root root 42 Oct  2 14:16 multi-port.conf -> /etc/nginx/sites-available/multi-port.conf
+lrwxrwxrwx 1 root root 38 Oct  2 15:16 my-app.conf -> /etc/nginx/sites-available/my-app.conf
+devops@halo:~$ grep -n default_server /etc/nginx/sites-enabled/*
+/etc/nginx/sites-enabled/my-app.conf:7:    # default_server: nhận mọi yêu cầu không khớp server_name nào
+/etc/nginx/sites-enabled/my-app.conf:9:    listen 80 default_server;
+/etc/nginx/sites-enabled/my-app.conf:10:    listen [::]:80 default_server;
+
+# ===== Phần 2: Kiểm tra backend Spring Boot trước khi cấu hình (09:03) =====
+
+devops@halo:~$ systemctl status spring-app.service --no-pager -l
+* spring-app.service - Spring Boot Application
+     Loaded: loaded (/etc/systemd/system/spring-app.service; enabled; preset: enabled)
+     Active: active (running) since Thu 2026-10-08 08:34:52 +07; 28min ago
+   Main PID: 23710 (java)
+      Tasks: 34 (limit: 4551)
+     Memory: 236.4M (peak: 241.9M)
+        CPU: 11.274s
+     CGroup: /system.slice/spring-app.service
+             `-23710 /usr/bin/java -jar /opt/spring-app/app.jar
+
+Oct 08 08:34:52 halo java[23710]: 2026-10-08T08:34:52.974+07:00  INFO 23710 --- [           main] com.example.springapp.SpringApp             : No active profile set, falling back to 1 default profile: "default"
+Oct 08 08:34:54 halo java[23710]: 2026-10-08T08:34:54.311+07:00  INFO 23710 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8082 (http)
+Oct 08 08:34:54 halo java[23710]: 2026-10-08T08:34:54.326+07:00  INFO 23710 --- [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+Oct 08 08:34:54 halo java[23710]: 2026-10-08T08:34:54.327+07:00  INFO 23710 --- [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.30]
+Oct 08 08:34:54 halo java[23710]: 2026-10-08T08:34:54.402+07:00  INFO 23710 --- [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+Oct 08 08:34:54 halo java[23710]: 2026-10-08T08:34:54.403+07:00  INFO 23710 --- [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 781 ms
+Oct 08 08:34:56 halo java[23710]: 2026-10-08T08:34:56.492+07:00  INFO 23710 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8082 (http) with context path '/'
+Oct 08 08:34:56 halo java[23710]: 2026-10-08T08:34:56.880+07:00  INFO 23710 --- [           main] com.example.springapp.SpringApp             : Started SpringApp in 3.912 seconds (process running for 4.376)
+Oct 08 08:41:19 halo java[23710]: 2026-10-08T08:41:19.377+07:00  INFO 23710 --- [nio-8082-exec-1] com.example.springapp.HealthController      : GET /health host=127.0.0.1:8082 x-real-ip=- x-forwarded-for=- x-forwarded-proto=-
+Oct 08 08:41:26 halo java[23710]: 2026-10-08T08:41:26.904+07:00  INFO 23710 --- [nio-8082-exec-2] com.example.springapp.HealthController      : HEAD /health host=127.0.0.1:8082 x-real-ip=- x-forwarded-for=- x-forwarded-proto=-
+devops@halo:~$ sudo ss -tlnp | grep 8082
+[sudo] password for devops:
+LISTEN 0      100        127.0.0.1:8082       0.0.0.0:*    users:(("java",pid=23710,fd=10))
+devops@halo:~$ curl -s http://127.0.0.1:8082/health; echo
+{"status":"UP","app":"spring-app","version":"1.0.0"}
+devops@halo:~$ curl -I http://127.0.0.1:8082/health
+HTTP/1.1 200 
+Content-Type: application/json
+Content-Length: 52
+Date: Thu, 08 Oct 2026 02:05:41 GMT
+
+# ===== Phần 3: Tạo trang tĩnh /var/www/html/index.html (09:08) =====
+
+devops@halo:~$ ls -la /var/www/html/
+total 12
+drwxr-xr-x 2 root root 4096 Sep 29 09:40 .
+drwxr-xr-x 3 root root 4096 Sep 29 09:40 ..
+-rw-r--r-- 1 root root  615 Sep 29 09:40 index.nginx-debian.html
+devops@halo:~$ sudo tee /var/www/html/index.html > /dev/null << 'EOF'
+> <!DOCTYPE html>
+> <html lang="vi">
+> <head>
+> <meta charset="utf-8">
+> <meta name="viewport" content="width=device-width, initial-scale=1">
+> <title>PTIT DevOps - Session 07 - Bài 4</title>
+> <style>
+>   body { font-family: Arial, Helvetica, sans-serif; background: #f4f6f8; color: #222; margin: 0; }
+>   main { max-width: 720px; margin: 40px auto; padding: 0 16px; }
+>   .card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
+>   h1 { font-size: 24px; margin: 0 0 4px; color: #0b5394; }
+>   h2 { font-size: 17px; margin: 0 0 12px; }
+>   .sub { margin: 0; color: #555; }
+>   table { border-collapse: collapse; width: 100%; }
+>   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e8eb; }
+>   th { width: 38%; color: #444; font-weight: 600; }
+>   code { background: #eef1f4; padding: 1px 5px; border-radius: 3px; }
+>   footer { color: #777; font-size: 13px; text-align: center; }
+> </style>
+> </head>
+> <body>
+> <main>
+>   <div class="card">
+>     <h1>PTIT DevOps Course</h1>
+>     <p class="sub">Session 07 - Bài 4: Cấu hình Reverse Proxy Nginx cho ứng dụng Spring Boot</p>
+>   </div>
+>
+>   <div class="card">
+>     <h2>Thông tin học viên</h2>
+>     <table>
+>       <tr><th>Họ tên</th><td>Lê Phú Toàn</td></tr>
+>       <tr><th>Mã lớp</th><td>PTIT-DEVOPS-2026</td></tr>
+>       <tr><th>Khóa học</th><td>PTIT DevOps Course</td></tr>
+>       <tr><th>Session</th><td>07 - Bài 4</td></tr>
+>     </table>
+>   </div>
+>
+>   <div class="card">
+>     <h2>Kiến trúc định tuyến</h2>
+>     <p>Nginx lắng nghe ở cổng 80 và phân luồng lưu lượng theo đường dẫn:</p>
+>     <table>
+>       <tr><th><code>/</code></th><td>Lưu lượng tĩnh, Nginx phục vụ trực tiếp từ <code>/var/www/html/</code> (trang này).</td></tr>
+>       <tr><th><code>/api/</code></th><td>Lưu lượng động, Nginx chuyển tiếp đến ứng dụng Spring Boot tại <code>127.0.0.1:8082</code>.</td></tr>
+>     </table>
+>     <p>Thử gọi <a href="/api/health"><code>/api/health</code></a> để nhận phản hồi JSON từ backend.</p>
+>   </div>
+>
+>   <footer>Phục vụ bởi Nginx - Reverse Proxy cho Spring Boot</footer>
+> </main>
+> </body>
+> </html>
+> EOF
+devops@halo:~$ ls -la /var/www/html/
+total 16
+drwxr-xr-x 2 root root 4096 Oct  8 09:10 .
+drwxr-xr-x 3 root root 4096 Sep 29 09:40 ..
+-rw-r--r-- 1 root root 2175 Oct  8 09:10 index.html
+-rw-r--r-- 1 root root  615 Sep 29 09:40 index.nginx-debian.html
+devops@halo:~$ wc -c /var/www/html/index.html
+2175 /var/www/html/index.html
+devops@halo:~$ stat -c '%U:%G %a %s %y' /var/www/html/index.html
+root:root 644 2175 2026-10-08 09:10:42.318204917 +0700
+devops@halo:~$ head -n 6 /var/www/html/index.html
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PTIT DevOps - Session 07 - Bài 4</title>
+
+# ===== Phần 4: Tạo file cấu hình spring-proxy.conf (09:14) =====
+
+devops@halo:~$ sudo tee /etc/nginx/sites-available/spring-proxy.conf > /dev/null << 'EOF'
+> # /etc/nginx/sites-available/spring-proxy.conf
+> # Server block làm Reverse Proxy cho ứng dụng Spring Boot (Session 07 - Bài 4).
+> #   - Đường dẫn "/"      : Nginx phục vụ trực tiếp trang tĩnh trong /var/www/html.
+> #   - Đường dẫn "/api/"  : Nginx chuyển tiếp (proxy_pass) đến Spring Boot ở 127.0.0.1:8082.
+> # Site này thay thế site my-app trên cổng 80, nên phải gỡ symlink my-app.conf
+> # khỏi sites-enabled trước khi kích hoạt (xem README).
+>
+> server {
+>     # Lắng nghe cổng 80 cho IPv4 và IPv6.
+>     # default_server: nhận mọi yêu cầu không khớp server_name nào,
+>     # ví dụ truy cập trực tiếp bằng địa chỉ IP của máy chủ.
+>     listen 80 default_server;
+>     listen [::]:80 default_server;
+>
+>     # Tên miền "_" là giá trị giữ chỗ, không khớp tên miền thật nào.
+>     server_name _;
+>
+>     # Thư mục chứa trang tĩnh và file chỉ mục mặc định.
+>     root /var/www/html;
+>     index index.html;
+>
+>     # Log riêng cho site này để dễ lọc khi chẩn đoán sự cố.
+>     access_log /var/log/nginx/spring-proxy.access.log;
+>     error_log  /var/log/nginx/spring-proxy.error.log;
+>
+>     # Khối 1 - Lưu lượng tĩnh.
+>     # Chỉ trả file có thật trong root, nếu không có thì trả 404.
+>     location / {
+>         try_files $uri $uri/ =404;
+>     }
+>
+>     # Khối 2 - Lưu lượng động (Reverse Proxy).
+>     # Mọi yêu cầu bắt đầu bằng /api/ được chuyển đến backend Spring Boot.
+>     location /api/ {
+>         # Dấu "/" ở cuối URL đích có chủ ý: Nginx thay phần "/api/" bằng "/"
+>         # trước khi gửi đi, nên /api/health thành /health ở backend.
+>         # Nếu bỏ dấu "/" cuối thì backend nhận nguyên /api/health và trả 404.
+>         proxy_pass http://127.0.0.1:8082/;
+>
+>         # Dùng HTTP/1.1 để nói chuyện với backend (mặc định Nginx dùng HTTP/1.0),
+>         # cho phép giữ kết nối keep-alive và chunked transfer.
+>         proxy_http_version 1.1;
+>
+>         # Chuyển tiếp thông tin của client gốc cho backend.
+>         # Nếu thiếu, backend chỉ thấy Host là 127.0.0.1:8082 và IP client là 127.0.0.1.
+>         proxy_set_header Host              $host;
+>         proxy_set_header X-Real-IP         $remote_addr;
+>         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+>         proxy_set_header X-Forwarded-Proto $scheme;
+>
+>         # Giới hạn thời gian: kết nối tới backend tối đa 5 giây,
+>         # chờ phản hồi tối đa 60 giây trước khi trả 504 Gateway Timeout.
+>         proxy_connect_timeout 5s;
+>         proxy_read_timeout    60s;
+>     }
+> }
+> EOF
+devops@halo:~$ ls -l /etc/nginx/sites-available/spring-proxy.conf
+-rw-r--r-- 1 root root 2690 Oct  8 09:16 /etc/nginx/sites-available/spring-proxy.conf
+devops@halo:~$ wc -l /etc/nginx/sites-available/spring-proxy.conf
+56 /etc/nginx/sites-available/spring-proxy.conf
+
+# ===== Phần 5: Gỡ site cũ, kích hoạt bằng symlink, kiểm tra cú pháp, reload (09:18) =====
+
+# Site my-app đang giữ default_server cổng 80 nên phải gỡ symlink (giữ nguyên file trong sites-available).
+devops@halo:~$ sudo rm /etc/nginx/sites-enabled/my-app.conf
+devops@halo:~$ ls -l /etc/nginx/sites-available/my-app.conf
+-rw-r--r-- 1 root root 1300 Oct  2 15:15 /etc/nginx/sites-available/my-app.conf
+devops@halo:~$ sudo ln -s /etc/nginx/sites-available/spring-proxy.conf /etc/nginx/sites-enabled/
+devops@halo:~$ ls -la /etc/nginx/sites-enabled/
+total 8
+drwxr-xr-x 2 root root 4096 Oct  8 09:19 .
+drwxr-xr-x 8 root root 4096 Sep 29 09:40 ..
+lrwxrwxrwx 1 root root   42 Oct  2 14:16 multi-port.conf -> /etc/nginx/sites-available/multi-port.conf
+lrwxrwxrwx 1 root root   44 Oct  8 09:19 spring-proxy.conf -> /etc/nginx/sites-available/spring-proxy.conf
+devops@halo:~$ sudo nginx -t
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+devops@halo:~$ sudo systemctl reload nginx
+devops@halo:~$ systemctl is-active nginx
+active
+devops@halo:~$ ps -eo user:8,pid,ppid,cmd | grep '[n]ginx'
+root        1342       1 nginx: master process /usr/sbin/nginx -g daemon on; master_process on;
+www-data   24598    1342 nginx: worker process
+www-data   24599    1342 nginx: worker process
+
+# ===== Phần 6: Kiểm tra theo đề bài (09:23) =====
+
+# --- Trên máy chủ: trang tĩnh ---
+devops@halo:~$ curl -I http://localhost/
+HTTP/1.1 200 OK
+Server: nginx/1.24.0 (Ubuntu)
+Date: Thu, 08 Oct 2026 02:23:08 GMT
+Content-Type: text/html
+Content-Length: 2175
+Last-Modified: Thu, 08 Oct 2026 02:10:42 GMT
+Connection: keep-alive
+ETag: "6ac6fba2-87f"
+Accept-Ranges: bytes
+
+devops@halo:~$ curl -s http://localhost/ | grep -E "Lê Phú Toàn|PTIT-DEVOPS-2026"
+      <tr><th>Họ tên</th><td>Lê Phú Toàn</td></tr>
+      <tr><th>Mã lớp</th><td>PTIT-DEVOPS-2026</td></tr>
+
+# --- Trên máy chủ: lưu lượng /api/ qua proxy ---
+devops@halo:~$ curl -I http://localhost/api/health
+HTTP/1.1 200 
+Server: nginx/1.24.0 (Ubuntu)
+Date: Thu, 08 Oct 2026 02:24:05 GMT
+Content-Type: application/json
+Content-Length: 52
+Connection: keep-alive
+
+devops@halo:~$ curl -s http://localhost/api/health; echo
+{"status":"UP","app":"spring-app","version":"1.0.0"}
+devops@halo:~$ curl -s -o /dev/null -w "%{http_code}\n" http://localhost/api/khong-ton-tai
+404
+devops@halo:~$ curl -s http://localhost/api/khong-ton-tai; echo
+{"timestamp":"2026-10-08T02:25:34.612+00:00","status":404,"error":"Not Found","path":"/khong-ton-tai"}
+devops@halo:~$ curl -s -o /dev/null -w "%{http_code}\n" http://localhost/khong-co.html
+404
+
+# --- Máy cá nhân (cửa sổ Git Bash): truy cập bằng IP công cộng ---
+$ curl -I http://103.116.104.228/
+HTTP/1.1 200 OK
+Server: nginx/1.24.0 (Ubuntu)
+Date: Thu, 08 Oct 2026 02:28:15 GMT
+Content-Type: text/html
+Content-Length: 2175
+Last-Modified: Thu, 08 Oct 2026 02:10:42 GMT
+Connection: keep-alive
+ETag: "6ac6fba2-87f"
+Accept-Ranges: bytes
+
+$ curl -s http://103.116.104.228/api/health; echo
+{"status":"UP","app":"spring-app","version":"1.0.0"}
+$ curl -I http://103.116.104.228/api/health
+HTTP/1.1 200 
+Server: nginx/1.24.0 (Ubuntu)
+Date: Thu, 08 Oct 2026 02:29:05 GMT
+Content-Type: application/json
+Content-Length: 52
+Connection: keep-alive
+
+$ curl -m 5 http://103.116.104.228:8082/health
+curl: (28) Connection timed out after 5002 milliseconds
+
+# --- Quay lại phiên SSH: access log của Nginx và log của backend ---
+devops@halo:~$ sudo tail -n 10 /var/log/nginx/spring-proxy.access.log
+127.0.0.1 - - [08/Oct/2026:09:23:08 +0700] "HEAD / HTTP/1.1" 200 0 "-" "curl/8.5.0"
+127.0.0.1 - - [08/Oct/2026:09:23:31 +0700] "GET / HTTP/1.1" 200 2175 "-" "curl/8.5.0"
+127.0.0.1 - - [08/Oct/2026:09:24:05 +0700] "HEAD /api/health HTTP/1.1" 200 0 "-" "curl/8.5.0"
+127.0.0.1 - - [08/Oct/2026:09:24:29 +0700] "GET /api/health HTTP/1.1" 200 52 "-" "curl/8.5.0"
+127.0.0.1 - - [08/Oct/2026:09:25:10 +0700] "GET /api/khong-ton-tai HTTP/1.1" 404 102 "-" "curl/8.5.0"
+127.0.0.1 - - [08/Oct/2026:09:25:34 +0700] "GET /api/khong-ton-tai HTTP/1.1" 404 102 "-" "curl/8.5.0"
+127.0.0.1 - - [08/Oct/2026:09:26:02 +0700] "GET /khong-co.html HTTP/1.1" 404 162 "-" "curl/8.5.0"
+113.161.72.19 - - [08/Oct/2026:09:28:15 +0700] "HEAD / HTTP/1.1" 200 0 "-" "curl/8.15.0"
+113.161.72.19 - - [08/Oct/2026:09:28:40 +0700] "GET /api/health HTTP/1.1" 200 52 "-" "curl/8.15.0"
+113.161.72.19 - - [08/Oct/2026:09:29:05 +0700] "HEAD /api/health HTTP/1.1" 200 0 "-" "curl/8.15.0"
+devops@halo:~$ journalctl -u spring-app.service -n 3 --no-pager
+Oct 08 09:24:29 halo java[23710]: 2026-10-08T09:24:29.517+07:00  INFO 23710 --- [nio-8082-exec-5] com.example.springapp.HealthController      : GET /health host=localhost x-real-ip=127.0.0.1 x-forwarded-for=127.0.0.1 x-forwarded-proto=http
+Oct 08 09:28:40 halo java[23710]: 2026-10-08T09:28:40.263+07:00  INFO 23710 --- [nio-8082-exec-6] com.example.springapp.HealthController      : GET /health host=103.116.104.228 x-real-ip=113.161.72.19 x-forwarded-for=113.161.72.19 x-forwarded-proto=http
+Oct 08 09:29:05 halo java[23710]: 2026-10-08T09:29:05.748+07:00  INFO 23710 --- [nio-8082-exec-7] com.example.springapp.HealthController      : HEAD /health host=103.116.104.228 x-real-ip=113.161.72.19 x-forwarded-for=113.161.72.19 x-forwarded-proto=http
+
+# ===== Phần 7: Minh họa lỗi 502 Bad Gateway khi backend dừng (09:33) =====
+
+devops@halo:~$ sudo systemctl stop spring-app.service
+devops@halo:~$ systemctl is-active spring-app.service
+inactive
+devops@halo:~$ sudo ss -tlnp | grep 8082; echo "exit=$?"
+exit=1
+devops@halo:~$ curl -I http://localhost/api/health
+HTTP/1.1 502 Bad Gateway
+Server: nginx/1.24.0 (Ubuntu)
+Date: Thu, 08 Oct 2026 02:33:47 GMT
+Content-Type: text/html
+Content-Length: 166
+Connection: keep-alive
+
+devops@halo:~$ curl -s -o /dev/null -w "%{http_code}\n" http://localhost/
+200
+devops@halo:~$ curl -s http://localhost/api/health
+<html>
+<head><title>502 Bad Gateway</title></head>
+<body>
+<center><h1>502 Bad Gateway</h1></center>
+<hr><center>nginx/1.24.0 (Ubuntu)</center>
+</body>
+</html>
+devops@halo:~$ sudo tail -n 2 /var/log/nginx/spring-proxy.error.log
+2026/10/08 09:33:47 [error] 24599#24599: *11 connect() failed (111: Connection refused) while connecting to upstream, client: 127.0.0.1, server: _, request: "HEAD /api/health HTTP/1.1", upstream: "http://127.0.0.1:8082/health", host: "localhost"
+2026/10/08 09:34:20 [error] 24599#24599: *13 connect() failed (111: Connection refused) while connecting to upstream, client: 127.0.0.1, server: _, request: "GET /api/health HTTP/1.1", upstream: "http://127.0.0.1:8082/health", host: "localhost"
+
+# --- Khởi động lại backend ---
+devops@halo:~$ sudo systemctl start spring-app.service
+devops@halo:~$ systemctl is-active spring-app.service
+active
+devops@halo:~$ curl -sI http://localhost/api/health | head -n 1
+HTTP/1.1 502 Bad Gateway
+devops@halo:~$ sleep 6; curl -sI http://localhost/api/health | head -n 1
+HTTP/1.1 200 
+devops@halo:~$ systemctl show spring-app.service -p MainPID
+MainPID=24735
+devops@halo:~$ journalctl -u spring-app.service -n 3 --no-pager
+Oct 08 09:35:06 halo java[24735]: 2026-10-08T09:35:06.214+07:00  INFO 24735 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8082 (http) with context path '/'
+Oct 08 09:35:06 halo java[24735]: 2026-10-08T09:35:06.287+07:00  INFO 24735 --- [           main] com.example.springapp.SpringApp             : Started SpringApp in 3.847 seconds (process running for 4.301)
+Oct 08 09:35:13 halo java[24735]: 2026-10-08T09:35:13.062+07:00  INFO 24735 --- [nio-8082-exec-1] com.example.springapp.HealthController      : HEAD /health host=localhost x-real-ip=127.0.0.1 x-forwarded-for=127.0.0.1 x-forwarded-proto=http
+devops@halo:~$ sudo grep ' 502 ' /var/log/nginx/spring-proxy.access.log
+127.0.0.1 - - [08/Oct/2026:09:33:47 +0700] "HEAD /api/health HTTP/1.1" 502 0 "-" "curl/8.5.0"
+127.0.0.1 - - [08/Oct/2026:09:34:20 +0700] "GET /api/health HTTP/1.1" 502 166 "-" "curl/8.5.0"
+127.0.0.1 - - [08/Oct/2026:09:35:04 +0700] "HEAD /api/health HTTP/1.1" 502 0 "-" "curl/8.5.0"
+
+# ===== Phần 8: Chạy thử script deploy_proxy.sh để kiểm tra tính idempotent (09:38) =====
+
+# --- Trên máy chủ: tạo thư mục đích ---
+devops@halo:~$ mkdir -p ~/ex4
+
+# --- Máy cá nhân (Git Bash): sao chép script và hai file nguồn lên máy chủ ---
+$ scp -P 2222 -i ~/.ssh/id_ed25519_ptit_s02 deploy_proxy.sh spring-proxy.conf index.html devops@103.116.104.228:~/ex4/
+deploy_proxy.sh                               100% 6658   142.8KB/s   00:00
+spring-proxy.conf                             100% 2690    58.1KB/s   00:00
+index.html                                    100% 2175    47.6KB/s   00:00
+
+# --- Trên máy chủ ---
+devops@halo:~$ cd ~/ex4
+devops@halo:~/ex4$ ls -l
+total 16
+-rwxr-xr-x 1 devops devops 6658 Oct  8 09:38 deploy_proxy.sh
+-rw-r--r-- 1 devops devops 2175 Oct  8 09:38 index.html
+-rw-r--r-- 1 devops devops 2690 Oct  8 09:38 spring-proxy.conf
+devops@halo:~/ex4$ bash -n deploy_proxy.sh && echo "cú pháp script hợp lệ"
+cú pháp script hợp lệ
+devops@halo:~/ex4$ diff -q index.html /var/www/html/index.html && diff -q spring-proxy.conf /etc/nginx/sites-available/spring-proxy.conf && echo "file nguồn giống bản đang chạy"
+file nguồn giống bản đang chạy
+devops@halo:~/ex4$ sudo ./deploy_proxy.sh
+[BO QUA] /var/www/html/index.html giống bản đang dùng
+[BO QUA] /etc/nginx/sites-available/spring-proxy.conf giống bản đang dùng
+[BO QUA] my-app.conf không được kích hoạt
+[BO QUA] default không được kích hoạt
+[BO QUA] symlink /etc/nginx/sites-enabled/spring-proxy.conf đã trỏ đúng
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+[OK] nginx -t thành công
+[RELOAD] nginx: active
+[KIEM TRA] GET /          -> HTTP 200
+[KIEM TRA] GET /api/health -> HTTP 200
+[XONG] Triển khai hoàn tất
+
+# ===== Phần 9: Kiểm tra lần cuối và đăng xuất (09:43) =====
+
+devops@halo:~/ex4$ sudo nginx -t
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+devops@halo:~/ex4$ ls -l /etc/nginx/sites-enabled/
+total 0
+lrwxrwxrwx 1 root root 42 Oct  2 14:16 multi-port.conf -> /etc/nginx/sites-available/multi-port.conf
+lrwxrwxrwx 1 root root 44 Oct  8 09:19 spring-proxy.conf -> /etc/nginx/sites-available/spring-proxy.conf
+devops@halo:~/ex4$ systemctl is-active nginx spring-app.service
+active
+active
+devops@halo:~/ex4$ exit
+logout
+Connection to 103.116.104.228 closed.
+$
